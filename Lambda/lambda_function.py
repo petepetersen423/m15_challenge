@@ -1,4 +1,5 @@
 ### Required Libraries ###
+
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
@@ -9,6 +10,16 @@ def parse_int(n):
     """
     try:
         return int(n)
+    except ValueError:
+        return float("nan")
+
+
+def parse_float(n):
+    """
+    Securely converts a non-numeric value to float.
+    """
+    try:
+        return float(n)
     except ValueError:
         return float("nan")
 
@@ -25,6 +36,49 @@ def build_validation_result(is_valid, violated_slot, message_content):
         "violatedSlot": violated_slot,
         "message": {"contentType": "PlainText", "content": message_content},
     }
+
+
+def validate_data(age, investment_amount, risk_level, intent_request):
+    """
+    Validates the data provided by the user.
+    """
+
+    # Validate that the user is less than 65 years old
+    if age is not None:
+        age = parse_int(age)
+        if age < 0 or age > 65:
+            return build_validation_result(
+                False,
+                "age",
+                "You should be at less then 65 years old to use this service, "
+                "please provide a different age.",
+            )
+
+    # Validate the investment amount, it should be > 5000
+    if investment_amount is not None:
+        investment_amount = parse_int(
+            investment_amount
+        )  # Since parameters are strings it's important to cast values
+        if investment_amount <= 5000:
+            return build_validation_result(
+                False,
+                "investment_amount",
+                "The amount to convert should be greater than 5000, "
+                "please provide a correct amount to invest.",
+            )
+
+    # Validate if a correct risk level was passed
+    if risk_level is not None:
+        risk_level = risk_level.lower()
+        if risk_level not in ["none", "low", "medium", "high"]:
+            return build_validation_result(
+                False,
+                "risk_level",
+                "Sorry, Select a valid risk.",
+            )
+
+    # A True results is returned if all data is valid
+    return build_validation_result(True, None, None)
 
 
 ### Dialog Actions Helper Functions ###
@@ -122,9 +176,66 @@ def recommend_portfolio(intent_request):
     age = get_slots(intent_request)["age"]
     investment_amount = get_slots(intent_request)["investmentAmount"]
     risk_level = get_slots(intent_request)["riskLevel"]
+
+    # Gets the invocation source, for Lex dialogs "DialogCodeHook" is expected.
     source = intent_request["invocationSource"]
 
-    # YOUR CODE GOES HERE!
+    if source == "DialogCodeHook":
+        # This code performs basic validation on the supplied input slots.
+
+        # Gets all the slots
+        slots = get_slots(intent_request)
+
+        # Validates user's input using the validate_data function
+        validation_result = validate_data(
+            age, investment_amount, risk_level, intent_request
+        )
+
+        # If the data provided by the user is not valid,
+        # the elicitSlot dialog action is used to re-prompt for the first violation detected.
+        if not validation_result["isValid"]:
+            slots[validation_result["violatedSlot"]] = None  # Cleans invalid slot
+
+            # Returns an elicitSlot dialog to request new data for the invalid slot
+            return elicit_slot(
+                intent_request["sessionAttributes"],
+                intent_request["currentIntent"]["name"],
+                slots,
+                validation_result["violatedSlot"],
+                validation_result["message"],
+            )
+
+        # Fetch current session attributes
+        output_session_attributes = intent_request["sessionAttributes"]
+
+        # Once all slots are valid, a delegate dialog is returned to Lex to choose the next course of action.
+        return delegate(output_session_attributes, get_slots(intent_request))
+
+    # Get the current price of bitcoin in dolars and make the conversion from dollars to bitcoin.
+    if risk_level == "none":
+        advice = "100% bonds (AGG), 0% equities (SPY)"
+    elif risk_level == "low":
+        advice = "60% bonds (AGG), 40% equities (SPY)"
+    elif risk_level == "medium":
+        advice = "40% bonds (AGG), 60% equities (SPY)"
+    elif risk_level == "high":
+        advice = "20% bonds (AGG), 80% equities (SPY)"
+    else:
+        advice = "unknown risk level, try again"
+
+    # Return a message with conversion's result.
+    return close(
+        intent_request["sessionAttributes"],
+        "Fulfilled",
+        {
+            "contentType": "PlainText",
+            "content": """Thank you for your information {}!;
+            Your recommended portfolio mix is {}.
+            """.format(
+                first_name, advice
+            ),
+        },
+    )
 
 
 ### Intents Dispatcher ###
